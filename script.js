@@ -302,7 +302,13 @@ function onHandResults(results) {
         handDownState[key] = isOpen;
     }
     if (detectedHandCount > 0) {
-        const anyHandOpen = Object.values(handDownState).some(v => v === true);
+        let anyHandOpen = false;
+        for (let i = 0; i < detectedHandCount; i++) {
+            if (handDownState[i] === true) {
+                anyHandOpen = true;
+                break;
+            }
+        }
         config.PAUSED = !anyHandOpen;
     }
     for (let i = detectedHandCount; i < handPointers.length; i++) {
