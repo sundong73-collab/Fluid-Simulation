@@ -259,7 +259,6 @@ function onHandResults(results) {
         const hp = handPointers[i];
         let camX = landmarks[8].x;
         let camY = landmarks[8].y;
-        camX = 1.0 - camX;
         const key = i;
         if (!smoothedPositions[key]) {
             smoothedPositions[key] = { x: camX, y: camY };
@@ -541,7 +540,6 @@ function startGUI () {
             if (!success) {
                 config.CAMERA_ENABLED = false;
                 cameraEnableCtrl.updateDisplay();
-                alert('Camera access denied. Please allow camera access in your browser settings and try again.');
             }
         } else {
             stopCamera();
