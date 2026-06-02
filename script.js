@@ -82,7 +82,7 @@ let config = {
     SUNRAYS: true,
     SUNRAYS_RESOLUTION: 196,
     SUNRAYS_WEIGHT: 1.0,
-    CAMERA_ENABLED: true,
+    CAMERA_ENABLED: false,
     CAMERA_PREVIEW: true,
     CAMERA_SENSITIVITY: 1.0,
     CAMERA_SMOOTHING: 0.5,
@@ -412,9 +412,8 @@ if (!ext.supportLinearFiltering) {
 (async function autoStart() {
     await checkCameraAvailability();
     await initHandTracking();
-    if (config.CAMERA_ENABLED) {
-        await startCamera();
-    }
+    // Don't auto-start camera — getUserMedia requires a user gesture on HTTPS origins.
+    // User enables camera via the dat.GUI "enable camera" checkbox instead.
 })();
 
 startGUI();
