@@ -158,10 +158,10 @@ async function startCamera() {
         showCameraStatus('active');
         return true;
     } catch (err) {
-        console.warn('Camera access denied or unavailable:', err.message);
+        console.warn('Camera error:', err.name, err.message, err);
         if (statusIndicator) {
             statusIndicator.style.display = 'block';
-            statusIndicator.textContent = 'Camera: ' + err.message;
+            statusIndicator.textContent = 'Camera: ' + (err.message || err.name || 'unknown error');
             statusIndicator.className = 'error';
             statusIndicator.style.opacity = '1';
         }
