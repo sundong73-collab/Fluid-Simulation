@@ -1,7 +1,0 @@
-{
-  "name": "fluid-simulation",
-  "private": true,
-  "scripts": {
-    "build": "echo 'No build needed — static site'"
-  }
-}
