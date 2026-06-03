@@ -141,10 +141,28 @@ async function startCamera() {
                 break;
             }
         }
-        const constraints = realCamera
-            ? { video: { deviceId: { exact: realCamera.deviceId }, width: { ideal: 640 }, height: { ideal: 480 } }, audio: false }
-            : { video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' }, audio: false };
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        let stream;
+        if (realCamera) {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: { deviceId: { exact: realCamera.deviceId }, width: { ideal: 640 }, height: { ideal: 480 } },
+                    audio: false
+                });
+            } catch (e) {
+                // enumerateDevices returns placeholder IDs before permission is granted;
+                // fall back to basic constraints which trigger the permission prompt properly
+                console.warn('Camera exact deviceId failed, retrying with basic constraints:', e.name);
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
+                    audio: false
+                });
+            }
+        } else {
+            stream = await navigator.mediaDevices.getUserMedia({
+                video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
+                audio: false
+            });
+        }
         cameraStream = stream;
         videoInput.srcObject = stream;
         videoPreview.srcObject = stream;
