@@ -85,8 +85,8 @@ let config = {
     CAMERA_ENABLED: false,
     CAMERA_PREVIEW: true,
     CAMERA_SENSITIVITY: 1.0,
-    CAMERA_SMOOTHING: 0.5,
-    HAND_OPEN_THRESHOLD: 0.35,
+    CAMERA_SMOOTHING: 0.15,
+
 }
 
 function pointerPrototype () {
@@ -295,7 +295,6 @@ function onHandResults(results) {
         deltaY = correctDeltaY(deltaY) * config.CAMERA_SENSITIVITY;
         lastHandPositions[key].x = texcoordX;
         lastHandPositions[key].y = texcoordY;
-        const isOpen = detectOpenHand(landmarks);
         const wasDown = handDownState[key] === true;
         hp.texcoordX = texcoordX;
         hp.texcoordY = texcoordY;
@@ -303,31 +302,17 @@ function onHandResults(results) {
         hp.prevTexcoordY = lastHandPositions[key].y - deltaY;
         hp.deltaX = deltaX;
         hp.deltaY = deltaY;
-        if (isOpen && !wasDown) {
+        if (!wasDown) {
+            // hand just detected — like mousedown
             hp.down = true;
             hp.moved = false;
             hp.color = generateColor();
-        } else if (!isOpen && wasDown) {
-            hp.down = false;
-            hp.moved = false;
-        } else if (isOpen && wasDown) {
+        } else {
+            // hand continues — like mousemove while button held
             hp.down = true;
             hp.moved = Math.abs(deltaX) > 0.0001 || Math.abs(deltaY) > 0.0001;
-        } else {
-            hp.down = false;
-            hp.moved = false;
         }
-        handDownState[key] = isOpen;
-    }
-    if (detectedHandCount > 0) {
-        let anyHandOpen = false;
-        for (let i = 0; i < detectedHandCount; i++) {
-            if (handDownState[i] === true) {
-                anyHandOpen = true;
-                break;
-            }
-        }
-        config.PAUSED = !anyHandOpen;
+        handDownState[key] = true;
     }
     for (let i = detectedHandCount; i < handPointers.length; i++) {
         handPointers[i].down = false;
@@ -577,7 +562,7 @@ function startGUI () {
     });
     cameraFolder.add(config, 'CAMERA_SENSITIVITY', 0.1, 5.0).name('sensitivity');
     cameraFolder.add(config, 'CAMERA_SMOOTHING', 0.0, 0.95).name('smoothing');
-    cameraFolder.add(config, 'HAND_OPEN_THRESHOLD', 0.15, 0.5).name('open threshold');
+
 
     // let github = gui.add({ fun : () => {
     //     window.open('https://github.com/PavelDoGreat/WebGL-Fluid-Simulation');
@@ -1522,18 +1507,14 @@ function update () {
         initFramebuffers();
     updateColors(dt);
     if (config.CAMERA_ENABLED && cameraEnabled && handLandmarker && sendErrorCount < MAX_SEND_ERRORS) {
-        frameSkipCounter++;
-        if (frameSkipCounter >= 2) {
-            frameSkipCounter = 0;
-            if (videoInput.readyState >= videoInput.HAVE_CURRENT_DATA && videoInput.videoWidth > 0) {
-                try {
-                    handLandmarker.send({ image: videoInput });
-                    sendCounter++;
-                } catch (e) {
-                    sendErrorCount++;
-                    if (sendErrorCount >= MAX_SEND_ERRORS) {
-                        console.error('MediaPipe send errors exceeded limit, stopping');
-                    }
+        if (videoInput.readyState >= videoInput.HAVE_CURRENT_DATA && videoInput.videoWidth > 0) {
+            try {
+                handLandmarker.send({ image: videoInput });
+                sendCounter++;
+            } catch (e) {
+                sendErrorCount++;
+                if (sendErrorCount >= MAX_SEND_ERRORS) {
+                    console.error('MediaPipe send errors exceeded limit, stopping');
                 }
             }
         }
@@ -1590,6 +1571,19 @@ function updateColors (dt) {
 function applyInputs () {
     if (splatStack.length > 0)
         multipleSplats(splatStack.pop());
+
+    // Interpolate hand pointers between MediaPipe callbacks for smooth trails
+    for (const hp of handPointers) {
+        if (hp.down && !hp.moved) {
+            hp.prevTexcoordX = hp.texcoordX;
+            hp.prevTexcoordY = hp.texcoordY;
+            hp.texcoordX += hp.deltaX * 0.33;
+            hp.texcoordY += hp.deltaY * 0.33;
+            hp.texcoordX = Math.max(0, Math.min(1, hp.texcoordX));
+            hp.texcoordY = Math.max(0, Math.min(1, hp.texcoordY));
+            hp.moved = true;
+        }
+    }
 
     pointers.forEach(p => {
         if (p.moved) {
