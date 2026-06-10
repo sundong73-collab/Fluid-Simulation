@@ -53,6 +53,8 @@ googleLink.addEventListener('click', e => {
 
 // Simulation section
 
+const isKiosk = new URLSearchParams(location.search).has('kiosk');
+
 const canvas = document.getElementsByTagName('canvas')[0];
 resizeCanvas();
 
@@ -177,7 +179,7 @@ async function startCamera() {
         return true;
     } catch (err) {
         console.warn('Camera error:', err.name, err.message, err);
-        if (statusIndicator) {
+        if (!isKiosk && statusIndicator) {
             statusIndicator.style.display = 'block';
             statusIndicator.textContent = 'Camera: ' + (err.message || err.name || 'unknown error');
             statusIndicator.className = 'error';
@@ -318,7 +320,7 @@ function onHandResults(results) {
         handPointers[i].down = false;
         handPointers[i].moved = false;
     }
-    if (statusIndicator && detectedHandCount > 0) {
+    if (!isKiosk && statusIndicator && detectedHandCount > 0) {
         statusIndicator.style.display = 'block';
         statusIndicator.className = 'active';
         statusIndicator.textContent = 'Hands: ' + detectedHandCount;
@@ -327,6 +329,7 @@ function onHandResults(results) {
 }
 
 function showCameraStatus(state) {
+    if (isKiosk) return;
     if (statusIndicator) {
         statusIndicator.style.display = 'block';
         statusIndicator.className = '';
@@ -419,7 +422,7 @@ if (!ext.supportLinearFiltering) {
     // User enables camera via the dat.GUI "enable camera" checkbox instead.
 })();
 
-startGUI();
+if (!isKiosk) startGUI();
 
 function getWebGLContext (canvas) {
     const params = { alpha: true, depth: false, stencil: false, antialias: false, preserveDrawingBuffer: false };

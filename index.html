@@ -21,6 +21,12 @@
         <meta property="og:url" content="https://paveldogreat.github.io/WebGL-Fluid-Simulation/">
         <meta property="og:image" content="https://paveldogreat.github.io/WebGL-Fluid-Simulation/logo.png">
 
+        <script>
+            // Kiosk mode detection — add class before paint to avoid FOUC
+            if (new URLSearchParams(location.search).has('kiosk')) {
+                document.documentElement.classList.add('kiosk-mode');
+            }
+        </script>
         <script type="text/javascript" src="dat.gui.min.js"></script>
         <script src="hands.js"></script>
         <style>
@@ -221,6 +227,14 @@
                     opacity: 1;
                 }
             }
+
+            /* Kiosk mode: hide all UI, show only canvas */
+            html.kiosk-mode .dg { display: none !important; }
+            html.kiosk-mode #camera-status { display: none !important; }
+            html.kiosk-mode #camera-dot { display: none !important; }
+            html.kiosk-mode #webcam-preview { display: none !important; }
+            html.kiosk-mode .promo { display: none !important; }
+            html.kiosk-mode #debug-panel { display: none !important; }
         </style>
         <script>
             window.ga=window.ga||function(){(ga.q=ga.q||[]).push(arguments)};ga.l=+new Date;
