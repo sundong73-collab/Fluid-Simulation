@@ -88,6 +88,7 @@ let config = {
     CAMERA_PREVIEW: true,
     CAMERA_SENSITIVITY: 1.0,
     CAMERA_SMOOTHING: 0.15,
+    HAND_OPEN_THRESHOLD: 0.8,
 
 }
 
@@ -122,7 +123,6 @@ const handPointers = [];
 let lastHandPositions = {};
 let smoothedPositions = {};
 let handDownState = {};
-let frameSkipCounter = 0;
 let handsReady = false;
 let sendErrorCount = 0;
 const MAX_SEND_ERRORS = 10;
@@ -184,6 +184,7 @@ async function startCamera() {
             statusIndicator.textContent = 'Camera: ' + (err.message || err.name || 'unknown error');
             statusIndicator.className = 'error';
             statusIndicator.style.opacity = '1';
+            positionCameraDot();
         }
         showCameraStatus('error');
         config.CAMERA_ENABLED = false;
@@ -304,27 +305,38 @@ function onHandResults(results) {
         hp.prevTexcoordY = lastHandPositions[key].y - deltaY;
         hp.deltaX = deltaX;
         hp.deltaY = deltaY;
-        if (!wasDown) {
-            // hand just detected — like mousedown
+        const isOpen = detectOpenHand(landmarks);
+        if (isOpen && !wasDown) {
+            // hand just opened — like mousedown
             hp.down = true;
             hp.moved = false;
             hp.color = generateColor();
-        } else {
-            // hand continues — like mousemove while button held
+        } else if (isOpen && wasDown) {
+            // hand stays open — like mousemove while button held
             hp.down = true;
             hp.moved = Math.abs(deltaX) > 0.0001 || Math.abs(deltaY) > 0.0001;
+        } else if (!isOpen) {
+            // closed fist — stop drawing
+            hp.down = false;
+            hp.moved = false;
         }
-        handDownState[key] = true;
+        handDownState[key] = isOpen;
     }
     for (let i = detectedHandCount; i < handPointers.length; i++) {
         handPointers[i].down = false;
         handPointers[i].moved = false;
+    }
+    // Any closed fist immediately pauses the simulation
+    if (detectedHandCount > 0) {
+        const anyHandClosed = handPointers.slice(0, detectedHandCount).some(hp => !hp.down);
+        config.PAUSED = anyHandClosed;
     }
     if (!isKiosk && statusIndicator && detectedHandCount > 0) {
         statusIndicator.style.display = 'block';
         statusIndicator.className = 'active';
         statusIndicator.textContent = 'Hands: ' + detectedHandCount;
         statusIndicator.style.opacity = '1';
+        positionCameraDot();
     }
 }
 
@@ -375,11 +387,32 @@ function showCameraStatus(state) {
         else if (state === 'error') cameraDot.className = 'unavailable';
         cameraDot.title = state === 'active' || state === 'available' ? 'Camera available' : state === 'error' ? 'Camera unavailable' : 'Checking camera...';
     }
+    positionCameraDot();
+}
+
+function positionCameraDot() {
+    if (isKiosk || !cameraDot) return;
+    requestAnimationFrame(() => {
+        if (!statusIndicator) return;
+        const rect = statusIndicator.getBoundingClientRect();
+        if (rect.width === 0 && rect.height === 0) {
+            // status hidden — fallback to top-right corner
+            cameraDot.style.top = '14px';
+            cameraDot.style.right = '14px';
+            cameraDot.style.left = 'auto';
+            return;
+        }
+        // 10px to the right of camera-status, vertically centered
+        cameraDot.style.top = (rect.top + rect.height / 2 - 6) + 'px';
+        cameraDot.style.right = 'auto';
+        cameraDot.style.left = (rect.right + 10) + 'px';
+    });
 }
 
 function hideCameraStatus() {
     if (statusIndicator) statusIndicator.style.display = 'none';
     if (cameraDot) cameraDot.className = 'inactive';
+    positionCameraDot();
 }
 
 async function checkCameraAvailability() {
@@ -1839,15 +1872,15 @@ canvas.addEventListener('mousedown', e => {
 });
 
 canvas.addEventListener('mousemove', e => {
-    let pointer = pointers[0];
-    if (!pointer.down) return;
+    let pointer = pointers.find(p => p.id == -1);
+    if (!pointer || !pointer.down) return;
     let posX = scaleByPixelRatio(e.offsetX);
     let posY = scaleByPixelRatio(e.offsetY);
     updatePointerMoveData(pointer, posX, posY);
 });
 
 window.addEventListener('mouseup', () => {
-    updatePointerUpData(pointers[0]);
+    updatePointerUpData(pointers.find(p => p.id == -1));
 });
 
 canvas.addEventListener('touchstart', e => {
@@ -1882,6 +1915,10 @@ window.addEventListener('touchend', e => {
         if (pointer == null) continue;
         updatePointerUpData(pointer);
     }
+});
+
+window.addEventListener('resize', () => {
+    positionCameraDot();
 });
 
 window.addEventListener('keydown', e => {
