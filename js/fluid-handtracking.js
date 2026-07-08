@@ -75,10 +75,17 @@ FS.RESIZE_DEBOUNCE_MS = 300;
 
     window.addEventListener('mousemove', function (e) {
         if (!dragging) return;
+        var newLeft = startLeft + e.clientX - dragStartX;
+        var newTop = startTop + e.clientY - dragStartY;
+        var pw = preview.offsetWidth;
+        var ph = preview.offsetHeight;
+        var minVisible = 40;
+        newLeft = Math.max(-pw + minVisible, Math.min(window.innerWidth - minVisible, newLeft));
+        newTop = Math.max(0, Math.min(window.innerHeight - 20, newTop));
         preview.style.right = 'auto';
         preview.style.bottom = 'auto';
-        preview.style.left = (startLeft + e.clientX - dragStartX) + 'px';
-        preview.style.top = (startTop + e.clientY - dragStartY) + 'px';
+        preview.style.left = newLeft + 'px';
+        preview.style.top = newTop + 'px';
     });
 
     window.addEventListener('mouseup', function () {
