@@ -222,13 +222,84 @@
                 }
             }
 
+            #sidebar {
+                position: fixed;
+                left: 0;
+                top: 0;
+                z-index: 50;
+                display: flex;
+                flex-direction: column;
+                max-height: calc(100vh - 160px);
+            }
+
+            #sidebar-content {
+                width: 280px;
+                background: rgba(0, 0, 0, 0.75);
+                border: 1px solid rgba(255, 255, 255, 0.12);
+                border-bottom: none;
+                border-radius: 0 10px 0 0;
+                padding: 16px 14px 16px 18px;
+                color: #ccc;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+                font-size: 14px;
+                line-height: 1.7;
+                overflow-y: auto;
+                overflow-x: hidden;
+                backdrop-filter: blur(8px);
+                -webkit-backdrop-filter: blur(8px);
+                max-height: 400px;
+                transition: max-height 0.3s ease, padding-top 0.3s ease, padding-bottom 0.3s ease;
+            }
+
+            #sidebar.collapsed #sidebar-content {
+                max-height: 0;
+                padding-top: 0;
+                padding-bottom: 0;
+                border: none;
+            }
+
+            #sidebar-content h3 {
+                margin: 0 0 12px 0;
+                font-size: 16px;
+                color: #A5F8D3;
+                font-weight: 600;
+                letter-spacing: 0.5px;
+            }
+
+            #sidebar-content p {
+                margin: 0 0 8px 0;
+            }
+
+            #sidebar-toggle {
+                width: 280px;
+                height: 26px;
+                background: rgba(0, 0, 0, 0.75);
+                border: 1px solid rgba(255, 255, 255, 0.12);
+                border-top: none;
+                border-radius: 0 0 10px 0;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                cursor: pointer;
+                color: #999;
+                font-size: 11px;
+                transition: color 0.2s, background 0.2s, border-radius 0.3s ease;
+                user-select: none;
+                backdrop-filter: blur(8px);
+                -webkit-backdrop-filter: blur(8px);
+            }
+
+            #sidebar.collapsed #sidebar-toggle {
+                border-radius: 0 10px 10px 0;
+                border-top: 1px solid rgba(255, 255, 255, 0.12);
+            }
+
+            #sidebar-toggle:hover {
+                color: #A5F8D3;
+                background: rgba(0, 0, 0, 0.85);
+            }
+
         </style>
-        <script>
-            window.ga=window.ga||function(){(ga.q=ga.q||[]).push(arguments)};ga.l=+new Date;
-            ga('create', 'UA-105392568-1', 'auto');
-            ga('send', 'pageview');
-        </script>
-        <script async src="https://www.google-analytics.com/analytics.js"></script>
     </head>
     <body>
         <div id="camera-status"></div>
@@ -236,6 +307,14 @@
         <video id="webcam" autoplay playsinline muted style="position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none;"></video>
         <div id="webcam-preview" style="position: fixed; bottom: 10px; right: 10px; width: 160px; height: 120px; border: 2px solid rgba(255,255,255,0.5); border-radius: 8px; overflow: hidden; z-index: 10;">
             <video id="webcam-preview-video" autoplay playsinline muted style="width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1);"></video>
+        </div>
+        <div id="sidebar">
+            <div id="sidebar-content">
+                <h3>使用说明</h3>
+                <p>1. 没有摄像头的状态下，可用鼠标左键拖拽。</p>
+                <p>2. 有摄像头的情况下，可在右侧卷栏中打开Camera -- enable camera。程序识别相机后可通过手势来控制流体模拟。</p>
+            </div>
+            <div id="sidebar-toggle" title="收起">▲</div>
         </div>
         <canvas></canvas>
         <div id="debug-panel" style="display:none;position:fixed;top:50px;left:10px;background:rgba(0,0,0,0.85);color:#0f0;font:12px monospace;padding:10px;border-radius:6px;z-index:200;line-height:1.6;min-width:260px;"></div>
@@ -262,6 +341,12 @@
             </div>
         </div>
 
-        <script src="./script.js"></script>
+        <script src="js/fluid-core.js"></script>
+        <script src="js/fluid-solver.js"></script>
+        <script src="js/fluid-render.js"></script>
+        <script src="js/fluid-input.js"></script>
+        <script src="js/fluid-handtracking.js"></script>
+        <script src="js/fluid-gui.js"></script>
+        <script src="js/fluid-main.js"></script>
     </body>
 </html>

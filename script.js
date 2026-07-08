@@ -41,13 +41,13 @@ promoPopupClose.addEventListener('click', e => {
 
 const appleLink = document.getElementById('apple_link');
 appleLink.addEventListener('click', e => {
-    ga('send', 'event', 'link promo', 'app');
+    if (typeof ga === 'function') ga('send', 'event', 'link promo', 'app');
     window.open('https://apps.apple.com/us/app/fluid-simulation/id1443124993');
 });
 
 const googleLink = document.getElementById('google_link');
 googleLink.addEventListener('click', e => {
-    ga('send', 'event', 'link promo', 'app');
+    if (typeof ga === 'function') ga('send', 'event', 'link promo', 'app');
     window.open('https://play.google.com/store/apps/details?id=games.paveldogreat.fluidsimfree');
 });
 
@@ -88,6 +88,10 @@ let config = {
     CAMERA_SENSITIVITY: 1.0,
     CAMERA_SMOOTHING: 0.15,
     HAND_OPEN_THRESHOLD: 0.8,
+    MEDIA_PIPE_FRAME_SKIP: 1,
+    MAX_HANDS: 6,
+    PERSON_DEPTH_THRESHOLD: 0.4,
+    PERSON_XY_THRESHOLD: 0.8,
 
 }
 
@@ -129,6 +133,9 @@ let sendCounter = 0;
 let lastHandCount = 0;
 let resultKeys = '';
 let diagnosticCounter = 0;
+let mediaPipeFrameCounter = 0;
+let resizeDebounceTimer = null;
+const RESIZE_DEBOUNCE_MS = 300;
 
 async function startCamera() {
     try {
@@ -193,8 +200,9 @@ async function startCamera() {
 
 function stopCamera() {
     if (cameraStream) {
-        cameraStream.getTracks().forEach(track => track.stop());
+        const tracks = cameraStream.getTracks();
         cameraStream = null;
+        tracks.forEach(track => track.stop());
     }
     videoInput.srcObject = null;
     videoPreview.srcObject = null;
@@ -222,7 +230,7 @@ async function initHandTracking() {
         locateFile: (file) => file
     });
     handLandmarker.setOptions({
-        maxNumHands: 2,
+        maxNumHands: config.MAX_HANDS,
         modelComplexity: 1,
         minDetectionConfidence: 0.1,
         minTrackingConfidence: 0.1,
@@ -238,11 +246,23 @@ async function initHandTracking() {
         onHandResults(results);
     });
     if (typeof handLandmarker.initialize === 'function') {
-        handLandmarker.initialize().then(() => {
-            console.log('MediaPipe Hands model loaded');
-        }).catch((e) => {
-            console.error('MediaPipe Hands initialize() failed:', e);
-        });
+        let retries = 0;
+        const maxRetries = 3;
+        function tryInit() {
+            handLandmarker.initialize().then(() => {
+                console.log('MediaPipe Hands model loaded');
+            }).catch((e) => {
+                retries++;
+                console.error('MediaPipe Hands initialize() attempt ' + retries + ' failed:', e);
+                if (retries < maxRetries) {
+                    setTimeout(tryInit, 1000 * retries);
+                } else {
+                    console.error('MediaPipe Hands initialization failed after ' + maxRetries + ' attempts');
+                    showCameraStatus('error');
+                }
+            });
+        }
+        tryInit();
     }
     return handLandmarker;
 }
@@ -265,17 +285,115 @@ function detectOpenHand(landmarks) {
     return avgDist > config.HAND_OPEN_THRESHOLD;
 }
 
+function clusterHandsByPerson(worldLandmarks, handedness) {
+    const n = worldLandmarks.length;
+    const clusters = [];
+    for (let i = 0; i < n; i++) {
+        const wrist = worldLandmarks[i][0];
+        clusters.push({
+            handIndices: [i],
+            wristX: wrist.x,
+            wristY: wrist.y,
+            wristZ: wrist.z,
+            avgDepth: wrist.z,
+            labels: handedness ? [handedness[i].label] : []
+        });
+    }
+    if (n <= 1) return clusters;
+    let merged = true;
+    while (merged) {
+        merged = false;
+        for (let i = 0; i < clusters.length && !merged; i++) {
+            for (let j = i + 1; j < clusters.length && !merged; j++) {
+                if (canBeSamePerson(clusters[i], clusters[j])) {
+                    clusters[i].handIndices.push(...clusters[j].handIndices);
+                    clusters[i].labels.push(...clusters[j].labels);
+                    const allZ = clusters[i].handIndices.map(idx => worldLandmarks[idx][0].z);
+                    clusters[i].avgDepth = allZ.reduce((a, b) => a + b, 0) / allZ.length;
+                    clusters[i].wristX = (clusters[i].wristX + clusters[j].wristX) / 2;
+                    clusters[i].wristY = (clusters[i].wristY + clusters[j].wristY) / 2;
+                    clusters[i].wristZ = Math.min(clusters[i].wristZ, clusters[j].wristZ);
+                    clusters.splice(j, 1);
+                    merged = true;
+                }
+            }
+        }
+    }
+    return clusters;
+}
+
+function canBeSamePerson(c1, c2) {
+    const depthThresh = config.PERSON_DEPTH_THRESHOLD;
+    const xyThresh = config.PERSON_XY_THRESHOLD;
+    if (c1.labels.length > 0 && c2.labels.length > 0) {
+        const c1OnlyLeft = c1.labels.every(l => l === 'Left');
+        const c1OnlyRight = c1.labels.every(l => l === 'Right');
+        const c2OnlyLeft = c2.labels.every(l => l === 'Left');
+        const c2OnlyRight = c2.labels.every(l => l === 'Right');
+        if ((c1OnlyLeft && c2OnlyLeft) || (c1OnlyRight && c2OnlyRight)) {
+            return false;
+        }
+    }
+    if (Math.abs(c1.avgDepth - c2.avgDepth) > depthThresh) return false;
+    const dx = c1.wristX - c2.wristX;
+    const dy = c1.wristY - c2.wristY;
+    if (Math.sqrt(dx * dx + dy * dy) > xyThresh) return false;
+    return true;
+}
+
+function selectBestHand(handIndices, landmarks) {
+    if (handIndices.length === 0) return null;
+    if (handIndices.length === 1) return handIndices[0];
+    for (const idx of handIndices) {
+        if (detectOpenHand(landmarks[idx])) return idx;
+    }
+    return handIndices[0];
+}
+
 function onHandResults(results) {
     if (!cameraEnabled || !results.multiHandLandmarks) return;
-    const detectedHandCount = results.multiHandLandmarks.length;
-    while (handPointers.length < detectedHandCount) {
+
+    const allLandmarks = results.multiHandLandmarks;
+    const allWorld = results.multiHandWorldLandmarks;
+    const allHandedness = results.multiHandedness;
+    const totalDetected = allLandmarks.length;
+
+    // Determine active hand indices via person-aware clustering
+    let activeIndices = [];
+    let personCount = 0;
+    if (totalDetected <= 2) {
+        activeIndices = Array.from({ length: totalDetected }, (_, i) => i);
+        personCount = totalDetected > 0 ? 1 : 0;
+    } else if (allWorld) {
+        const clusters = clusterHandsByPerson(allWorld, allHandedness);
+        clusters.sort((a, b) => a.avgDepth - b.avgDepth);
+        personCount = clusters.length;
+        if (clusters.length === 1) {
+            activeIndices = clusters[0].handIndices.slice(0, 2);
+        } else {
+            for (let i = 0; i < 2 && i < clusters.length; i++) {
+                const best = selectBestHand(clusters[i].handIndices, allLandmarks);
+                if (best !== null) activeIndices.push(best);
+            }
+        }
+    } else {
+        activeIndices = [0, 1];
+        personCount = 1;
+    }
+
+    // Ensure handPointers array matches active hand count
+    const activeCount = activeIndices.length;
+    while (handPointers.length < activeCount) {
         const hp = new pointerPrototype();
         hp.id = -10 - handPointers.length;
         pointers.push(hp);
         handPointers.push(hp);
     }
-    for (let i = 0; i < detectedHandCount; i++) {
-        const landmarks = results.multiHandLandmarks[i];
+
+    // Process each active hand
+    for (let i = 0; i < activeCount; i++) {
+        const handIdx = activeIndices[i];
+        const landmarks = allLandmarks[handIdx];
         const hp = handPointers[i];
         let camX = landmarks[8].x;
         let camY = landmarks[8].y;
@@ -306,34 +424,34 @@ function onHandResults(results) {
         hp.deltaY = deltaY;
         const isOpen = detectOpenHand(landmarks);
         if (isOpen && !wasDown) {
-            // hand just opened — like mousedown
             hp.down = true;
             hp.moved = false;
             hp.color = generateColor();
         } else if (isOpen && wasDown) {
-            // hand stays open — like mousemove while button held
             hp.down = true;
             hp.moved = Math.abs(deltaX) > 0.0001 || Math.abs(deltaY) > 0.0001;
         } else if (!isOpen) {
-            // closed fist — stop drawing
             hp.down = false;
             hp.moved = false;
         }
         handDownState[key] = isOpen;
     }
-    for (let i = detectedHandCount; i < handPointers.length; i++) {
+
+    // Clear unused hand pointer slots
+    for (let i = activeCount; i < handPointers.length; i++) {
         handPointers[i].down = false;
         handPointers[i].moved = false;
     }
+
     // Any closed fist immediately pauses the simulation
-    if (detectedHandCount > 0) {
-        const anyHandClosed = handPointers.slice(0, detectedHandCount).some(hp => !hp.down);
+    if (activeCount > 0) {
+        const anyHandClosed = handPointers.slice(0, activeCount).some(hp => !hp.down);
         config.PAUSED = anyHandClosed;
     }
-    if (statusIndicator && detectedHandCount > 0) {
+    if (statusIndicator && activeCount > 0) {
         statusIndicator.style.display = 'block';
         statusIndicator.className = 'active';
-        statusIndicator.textContent = 'Hands: ' + detectedHandCount;
+        statusIndicator.textContent = 'Hands: ' + activeCount + (totalDetected > 2 ? ' (detected ' + totalDetected + ', ' + personCount + ' ppl)' : '');
         statusIndicator.style.opacity = '1';
         positionCameraDot();
     }
@@ -436,6 +554,24 @@ async function checkCameraAvailability() {
 
 const { gl, ext } = getWebGLContext(canvas);
 
+canvas.addEventListener('webglcontextlost', (event) => {
+    event.preventDefault();
+    console.warn('WebGL context lost');
+    if (statusIndicator) {
+        statusIndicator.textContent = 'WebGL context lost — recovering...';
+        statusIndicator.className = 'error';
+        statusIndicator.style.display = 'block';
+    }
+});
+
+canvas.addEventListener('webglcontextrestored', () => {
+    console.log('WebGL context restored, reinitializing');
+    updateKeywords();
+    initFramebuffers();
+    ditheringTexture = createTextureAsync('LDR_LLL1_0.png');
+    hideCameraStatus();
+});
+
 if (isMobile()) {
     config.DYE_RESOLUTION = 512;
 }
@@ -493,7 +629,7 @@ function getWebGLContext (canvas) {
         formatR = getSupportedFormat(gl, gl.RGBA, gl.RGBA, halfFloatTexType);
     }
 
-    ga('send', 'event', isWebGL2 ? 'webgl2' : 'webgl', formatRGBA == null ? 'not supported' : 'supported');
+    if (typeof ga === 'function') ga('send', 'event', isWebGL2 ? 'webgl2' : 'webgl', formatRGBA == null ? 'not supported' : 'supported');
 
     return {
         gl,
@@ -554,6 +690,7 @@ function startGUI () {
     gui.add(config, 'PRESSURE', 0.0, 1.0).name('pressure');
     gui.add(config, 'CURL', 0, 50).name('vorticity').step(1);
     gui.add(config, 'SPLAT_RADIUS', 0.01, 1.0).name('splat radius');
+    gui.add(config, 'SPLAT_FORCE', 1000, 20000).name('splat force').step(100);
     gui.add(config, 'SHADING').name('shading').onFinishChange(updateKeywords);
     gui.add(config, 'COLORFUL').name('colorful');
     gui.add(config, 'PAUSED').name('paused').listen();
@@ -596,47 +733,12 @@ function startGUI () {
     });
     cameraFolder.add(config, 'CAMERA_SENSITIVITY', 0.1, 5.0).name('sensitivity');
     cameraFolder.add(config, 'CAMERA_SMOOTHING', 0.0, 0.95).name('smoothing');
+    cameraFolder.add(config, 'MEDIA_PIPE_FRAME_SKIP', 1, 5).name('detection rate').step(1);
+    cameraFolder.add(config, 'HAND_OPEN_THRESHOLD', 0.15, 0.95).name('open hand threshold');
+    cameraFolder.add(config, 'MAX_HANDS', 2, 10).name('max hands detect').step(1);
+    cameraFolder.add(config, 'PERSON_DEPTH_THRESHOLD', 0.2, 1.0).name('person depth thr');
+    cameraFolder.add(config, 'PERSON_XY_THRESHOLD', 0.4, 1.5).name('person xy thr');
 
-
-    // let github = gui.add({ fun : () => {
-    //     window.open('https://github.com/PavelDoGreat/WebGL-Fluid-Simulation');
-    //     ga('send', 'event', 'link button', 'github');
-    // } }, 'fun').name('Github');
-    // github.__li.className = 'cr function bigFont';
-    // github.__li.style.borderLeft = '3px solid #8C8C8C';
-    // let githubIcon = document.createElement('span');
-    // github.domElement.parentElement.appendChild(githubIcon);
-    // githubIcon.className = 'icon github';
-
-    // let twitter = gui.add({ fun : () => {
-    //     ga('send', 'event', 'link button', 'twitter');
-    //     window.open('https://twitter.com/PavelDoGreat');
-    // } }, 'fun').name('Twitter');
-    // twitter.__li.className = 'cr function bigFont';
-    // twitter.__li.style.borderLeft = '3px solid #8C8C8C';
-    // let twitterIcon = document.createElement('span');
-    // twitter.domElement.parentElement.appendChild(twitterIcon);
-    // twitterIcon.className = 'icon twitter';
-
-    // let discord = gui.add({ fun : () => {
-    //     ga('send', 'event', 'link button', 'discord');
-    //     window.open('https://discordapp.com/invite/CeqZDDE');
-    // } }, 'fun').name('Discord');
-    // discord.__li.className = 'cr function bigFont';
-    // discord.__li.style.borderLeft = '3px solid #8C8C8C';
-    // let discordIcon = document.createElement('span');
-    // discord.domElement.parentElement.appendChild(discordIcon);
-    // discordIcon.className = 'icon discord';
-
-    // let app = gui.add({ fun : () => {
-    //     ga('send', 'event', 'link button', 'app');
-    //     window.open('http://onelink.to/5b58bn');
-    // } }, 'fun').name('Check out mobile app');
-    // app.__li.className = 'cr function appBigFont';
-    // app.__li.style.borderLeft = '3px solid #00FF7F';
-    // let appIcon = document.createElement('span');
-    // app.domElement.parentElement.appendChild(appIcon);
-    // appIcon.className = 'icon app';
 
     if (isMobile())
         gui.close();
@@ -1537,18 +1639,26 @@ update();
 
 function update () {
     const dt = calcDeltaTime();
-    if (resizeCanvas())
-        initFramebuffers();
+    if (resizeCanvas()) {
+        if (resizeDebounceTimer) clearTimeout(resizeDebounceTimer);
+        resizeDebounceTimer = setTimeout(() => {
+            initFramebuffers();
+            resizeDebounceTimer = null;
+        }, RESIZE_DEBOUNCE_MS);
+    }
     updateColors(dt);
-    if (config.CAMERA_ENABLED && cameraEnabled && handLandmarker && sendErrorCount < MAX_SEND_ERRORS) {
-        if (videoInput.readyState >= videoInput.HAVE_CURRENT_DATA && videoInput.videoWidth > 0) {
-            try {
-                handLandmarker.send({ image: videoInput });
-                sendCounter++;
-            } catch (e) {
-                sendErrorCount++;
-                if (sendErrorCount >= MAX_SEND_ERRORS) {
-                    console.error('MediaPipe send errors exceeded limit, stopping');
+    mediaPipeFrameCounter++;
+    if (!config.PAUSED && config.CAMERA_ENABLED && cameraEnabled && handLandmarker && handsReady && sendErrorCount < MAX_SEND_ERRORS) {
+        if (mediaPipeFrameCounter % config.MEDIA_PIPE_FRAME_SKIP === 0) {
+            if (videoInput.readyState >= videoInput.HAVE_CURRENT_DATA && videoInput.videoWidth > 0) {
+                try {
+                    handLandmarker.send({ image: videoInput });
+                    sendCounter++;
+                } catch (e) {
+                    sendErrorCount++;
+                    if (sendErrorCount >= MAX_SEND_ERRORS) {
+                        console.error('MediaPipe send errors exceeded limit, stopping');
+                    }
                 }
             }
         }
@@ -1605,6 +1715,8 @@ function updateColors (dt) {
 function applyInputs () {
     if (splatStack.length > 0)
         multipleSplats(splatStack.pop());
+
+    if (config.PAUSED) return;
 
     // Interpolate hand pointers between MediaPipe callbacks for smooth trails
     for (const hp of handPointers) {
@@ -1884,12 +1996,15 @@ window.addEventListener('mouseup', () => {
 canvas.addEventListener('touchstart', e => {
     e.preventDefault();
     const touches = e.targetTouches;
-    while (touches.length >= pointers.length)
-        pointers.push(new pointerPrototype());
     for (let i = 0; i < touches.length; i++) {
         let posX = scaleByPixelRatio(touches[i].pageX);
         let posY = scaleByPixelRatio(touches[i].pageY);
-        updatePointerDownData(pointers[i + 1], touches[i].identifier, posX, posY);
+        let pointer = pointers.find(p => p.id === touches[i].identifier);
+        if (!pointer) {
+            pointer = new pointerPrototype();
+            pointers.push(pointer);
+        }
+        updatePointerDownData(pointer, touches[i].identifier, posX, posY);
     }
 });
 
@@ -1897,8 +2012,8 @@ canvas.addEventListener('touchmove', e => {
     e.preventDefault();
     const touches = e.targetTouches;
     for (let i = 0; i < touches.length; i++) {
-        let pointer = pointers[i + 1];
-        if (!pointer.down) continue;
+        let pointer = pointers.find(p => p.id === touches[i].identifier);
+        if (!pointer || !pointer.down) continue;
         let posX = scaleByPixelRatio(touches[i].pageX);
         let posY = scaleByPixelRatio(touches[i].pageY);
         updatePointerMoveData(pointer, posX, posY);
@@ -1924,6 +2039,11 @@ window.addEventListener('keydown', e => {
         config.PAUSED = !config.PAUSED;
     if (e.key === ' ')
         splatStack.push(parseInt(Math.random() * 20) + 5);
+    if (e.code === 'KeyD' && e.ctrlKey) {
+        e.preventDefault();
+        const dbg = document.getElementById('debug-panel');
+        if (dbg) dbg.style.display = dbg.style.display === 'none' ? 'block' : 'none';
+    }
 });
 
 function updatePointerDownData (pointer, id, posX, posY) {
@@ -2047,3 +2167,23 @@ function hashCode (s) {
     }
     return hash;
 };
+
+// Sidebar toggle
+(function () {
+    const sidebar = document.getElementById('sidebar');
+    const toggle = document.getElementById('sidebar-toggle');
+    let isOpen = true;
+
+    toggle.addEventListener('click', function () {
+        isOpen = !isOpen;
+        if (isOpen) {
+            sidebar.classList.remove('collapsed');
+            toggle.innerHTML = '▲';
+            toggle.title = '收起';
+        } else {
+            sidebar.classList.add('collapsed');
+            toggle.innerHTML = '▼';
+            toggle.title = '展开';
+        }
+    });
+})();

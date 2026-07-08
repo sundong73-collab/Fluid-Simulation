@@ -43,6 +43,9 @@ http.createServer((req, res) => {
         res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
         res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
         res.setHeader('Content-Type', contentType);
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
 
         res.writeHead(200);
         res.end(data);

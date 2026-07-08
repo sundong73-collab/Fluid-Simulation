@@ -63,15 +63,15 @@ Based on Jos Stam's "Stable Fluids" (GPU Gems Ch. 38). Each frame, `step(dt)` ru
 
 ### Hand tracking / 手势追踪
 
-Camera → MediaPipe Hands (every 2nd frame, selfieMode, low detection thresholds, max 2 hands). Flow:
-摄像头 → MediaPipe Hands（每2帧，自拍模式，低检测阈值，最多2手）。流程：
+Camera → MediaPipe Hands (every frame, selfieMode, low detection thresholds, max 6 hands detected, depth-prioritized to 2). Flow:
+摄像头 → MediaPipe Hands（每帧，自拍模式，低检测阈值，最多检测6手，深度优先取最近2手）。流程：
 
 1. **`autoStart()`** — IIFE at page load: `checkCameraAvailability()` → `initHandTracking()` → `startCamera()`
 2. **`checkCameraAvailability()`** — Uses Permissions API (`navigator.permissions.query`), no getUserMedia prompt / 使用 Permissions API 静默检测，不触发权限弹窗
 3. **`startCamera()`** — Enumerates devices, filters NDI/OBS virtual cams, targets real camera by `deviceId: { exact }` / 枚举设备，过滤虚拟摄像头
 4. **`initHandTracking()`** — Creates `new Hands({ locateFile: local })`, `selfieMode: true`, lowered detection thresholds (0.1), background `initialize()` / 本地文件，后台初始化
-5. **`detectOpenHand()`** — Normalized avg distance of 4 non-thumb fingertips (8,12,16,20) to wrist (0) vs `HAND_OPEN_THRESHOLD` (0.35) → open → draw / 归一化指尖到手腕距离 → 张握拳判断
-6. **Smoothing**: `new = old * (1 - s) + raw * s`, via `CAMERA_SMOOTHING` (0.5)
+5. **`detectOpenHand()`** — Normalized avg distance of 4 non-thumb fingertips (8,12,16,20) to wrist (0) vs `HAND_OPEN_THRESHOLD` (0.8) → open → draw / 归一化指尖到手腕距离 → 张握拳判断
+6. **Smoothing**: `new = old * (1 - s) + raw * s`, via `CAMERA_SMOOTHING` (0.15)
 7. **Debug panel**: `#debug-panel` div updated every 30 frames with camera/detection stats / 每30帧更新诊断面板
 
 ### Coordinate conventions / 坐标约定
@@ -93,12 +93,12 @@ Camera → MediaPipe Hands (every 2nd frame, selfieMode, low detection threshold
 | `PRESSURE_ITERATIONS` | 20 | 10–80 |
 | `CURL` | 30 | 0–50 |
 | `SPLAT_RADIUS` | 0.25 | 0.01–1.0 |
-| `SPLAT_FORCE` | 6000 | (hardcoded / 硬编码) |
-| `CAMERA_ENABLED` | **true** | checkbox |
+| `SPLAT_FORCE` | 6000 | 1000–20000 |
+| `CAMERA_ENABLED` | false | checkbox |
 | `CAMERA_PREVIEW` | **true** | checkbox |
 | `CAMERA_SENSITIVITY` | 1.0 | 0.1–5.0 |
-| `CAMERA_SMOOTHING` | 0.5 | 0–0.95 |
-| `HAND_OPEN_THRESHOLD` | 0.35 | 0.15–0.5 |
+| `CAMERA_SMOOTHING` | 0.15 | 0–0.95 |
+| `HAND_OPEN_THRESHOLD` | 0.8 | 0.15–0.95 |
 | `BLOOM` | true | checkbox |
 | `SUNRAYS` | true | checkbox |
 | `COLORFUL` | true | checkbox |
@@ -117,4 +117,4 @@ Camera → MediaPipe Hands (every 2nd frame, selfieMode, low detection threshold
 - **COOP/COEP headers mandatory** — `server.js` for local dev, `_headers` for Cloudflare Pages. `file://` protocol will not work. / **COOP/COEP 头必须** —— 本地用 `server.js`，部署用 `_headers`。
 - **Virtual camera filtering** — NDI/OBS cameras skipped in `startCamera()` by label check. / **虚拟摄像头过滤** —— `startCamera()` 通过标签过滤。
 - **All MediaPipe files are local** — No CDN dependency. 7 files (~16MB): hands.js, WASM, tflite, binarypb, asset data/loader.
-- **No `package.json`** — Missing intentionally to prevent Cloudflare Pages from running Wrangler/npm install. / **无 `package.json`** —— 故意不创建，防止 Cloudflare Pages 自动安装 Wrangler 依赖。
+- **`package.json` exists at root** — for Electron packaging only (devDependencies: electron, electron-builder). The `deploy/` directory (Cloudflare Pages target) does NOT contain `package.json` to prevent Wrangler auto-install. / **根目录 `package.json`** —— 仅用于 Electron 打包；`deploy/` 部署目录不含 `package.json`。
