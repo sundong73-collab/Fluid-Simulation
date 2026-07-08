@@ -51,6 +51,49 @@ FS.mediaPipeFrameCounter = 0;
 FS.resizeDebounceTimer = null;
 FS.RESIZE_DEBOUNCE_MS = 300;
 
+// --- Preview panel: drag & collapse ---
+(function () {
+    var preview = FS.previewContainer;
+    var header = document.getElementById('preview-header');
+    var body = document.getElementById('preview-body');
+    var btn = document.getElementById('preview-collapse-btn');
+    var dragging = false, dragStartX, dragStartY, startLeft, startTop;
+    var collapsed = false;
+
+    if (!preview || !header) return;
+
+    header.addEventListener('mousedown', function (e) {
+        if (e.target === btn) return; // don't drag when clicking collapse button
+        dragging = true;
+        var rect = preview.getBoundingClientRect();
+        dragStartX = e.clientX;
+        dragStartY = e.clientY;
+        startLeft = rect.left;
+        startTop = rect.top;
+        e.preventDefault();
+    });
+
+    window.addEventListener('mousemove', function (e) {
+        if (!dragging) return;
+        preview.style.right = 'auto';
+        preview.style.bottom = 'auto';
+        preview.style.left = (startLeft + e.clientX - dragStartX) + 'px';
+        preview.style.top = (startTop + e.clientY - dragStartY) + 'px';
+    });
+
+    window.addEventListener('mouseup', function () {
+        dragging = false;
+    });
+
+    btn.addEventListener('click', function (e) {
+        collapsed = !collapsed;
+        body.style.display = collapsed ? 'none' : 'block';
+        btn.textContent = collapsed ? '+' : '−';
+        btn.title = collapsed ? '展开预览' : '折叠预览';
+        e.stopPropagation();
+    });
+})();
+
 // --- Private helpers ---
 
 function generateColor () {
